@@ -394,9 +394,11 @@ Strategy:
 6. Read block containing write pointer and place in buffer
 */
 int sfs_fwrite(int fileID, char *buf, int length){
-  /*
-  ********NEED TO CHECK IF FILE IS OPEN*********
-  */
+  /*Check if file is open*/
+  if(fd_table[fileID].is_free){
+    return -1;
+  }
+
   int inode_id = fd_table[fileID].inode_id;
   int write_pointer = fd_table[fileID].write_pointer;
 
@@ -429,11 +431,11 @@ int sfs_fwrite(int fileID, char *buf, int length){
   int block_to_end = (write_pointer+length)/1024;
 
   /*Check if the starting node is greater than 10, requiring a search in the indirection node*/
-  if(block_to_write>9){
+  if(block_to_write>11){
     /*Check indirection block*/
   }
 
-  if(block_to_end>9){
+  if(block_to_end>11){
     /*Check indrection block*/
   }
 
@@ -460,18 +462,20 @@ int sfs_fwrite(int fileID, char *buf, int length){
 
   /*Keep writing what's in container until nothing left*/
   int current_block = block_to_write;
+  char * current_content_block;
+  int free_block;
   while(size_in_blocks>0){
 
     /*If block not yet written to, find free block to write to*/
     if(in.block_pointers[current_block] == -1){
       /*Search bitmap for empty block*/
-      int free_block = get_first_empty_block();
+      free_block = get_first_empty_block();
       bm[free_block] = 1;
       in.block_pointers[current_block] = free_block;
     }
 
     /*Segment contianer into block increments*/
-    char * current_content_block = malloc(1024*sizeof(char));
+    current_content_block = malloc(1024*sizeof(char));
     strncpy(current_content_block, container, 1024);
 
     /*Remove 1 blocks worth of content*/
@@ -497,20 +501,97 @@ int sfs_fwrite(int fileID, char *buf, int length){
   write_blocks(1, 1, &inode_table);
   write_blocks(2, 1, &bm);
 
-  /*PURELY FOR TESTING*/
-  void * b = malloc(4096*sizeof(char));
+  // /*PURELY FOR TESTING*/
+  // void * b = malloc(4096*sizeof(char));
 
-  read_blocks(4,1,b);
+  // read_blocks(4,1,b);
 
-  char * c = (char*) b;
-  printf("Result: %s\n", c);
+  // char * c = (char*) b;
+  // printf("Result: %s\n", c);
 
 
   free(container);
-  return 0;
+  return length;
 }
+
+/**/
 int sfs_fread(int fileID, char *buf, int length){
-  	return 0;
+  /*Check if file is open*/
+  if(fd_table[fileID].is_free){
+    return -1;
+  }
+
+  int inode_id = fd_table[fileID].inode_id;
+  int read_pointer = fd_table[fileID].read_pointer;
+  I_Node in = inode_table[inode_id];
+
+  /*Find the block in which the read pointer is located*/
+  int block_of_read_pointer = read_pointer/1024;
+
+  /*Find the block which the read pointer will stop reading at*/
+  int block_last_read = (read_pointer+length)/1024;
+
+  /*Check to see if block_of_read_pointer and block_last_read are the same block*/
+  if(block_of_read_pointer==block_last_read){
+    void * only_read_buffer = malloc(1024*sizeof(char));
+    read_blocks(in.block_pointers[block_of_read_pointer], 1, only_read_buffer);
+    char * only_read_block = (char*)only_read_buffer;
+    free(only_read_buffer);
+
+    strcpy(buf, only_read_block+(read_pointer%1024));
+    strcpy(buf+(read_pointer%1024)+(length%1024), "");
+    return length;
+  }
+
+  /*Look in indirection pointer*/
+  if(block_of_read_pointer>11){
+
+  }
+
+  /*Look in indirection pointer*/
+  if(block_last_read>11){
+
+  }
+
+  /*Read the first block containing the read pointer.
+    Then read every block in between the read pointer and the last read block.
+    Then read the last read block.*/
+
+  /*Read the first block into inital container*/
+  void * first_read_buffer = malloc(1024*sizeof(char));
+  read_blocks(in.block_pointers[block_of_read_pointer], 1, first_read_buffer);
+  char * first_read_block = (char*)first_read_buffer;
+  free(first_read_buffer);
+
+  /*Buf will now contain the content of the block containing the read_pointer*/
+  strcpy(buf, first_read_block+(read_pointer%1024));
+
+  /*Loop through each block between the read_pointer block and the last read block*/
+  int current = block_of_read_pointer;
+  void * read_buffer;
+  char * read_block;
+  while(current<block_last_read){
+
+    read_buffer = malloc(1024*sizeof(char));
+    read_blocks(in.block_pointers[current], 1, read_buffer);
+    read_block = (char*)first_read_buffer;
+    free(read_buffer);
+
+    strcpy(buf+strlen(buf), read_block);
+
+    current++;
+  }
+
+  /*Read the last block up to the specified length*/
+  void * last_read_buffer = malloc(1024*sizeof(char));
+  read_blocks(in.block_pointers[block_last_read], 1, last_read_buffer);
+  char * last_read_block = (char*)last_read_buffer;
+  free(last_read_buffer);
+
+  /*Copy the last block portion into the buf*/
+  strcpy(buf+strlen(buf), last_read_block);
+
+  return length;
 }
 int sfs_remove(char *file){
   	return 0;

@@ -40,17 +40,35 @@ void closeFileTest(int FileID){
 	sfs_fclose(FileID);
 }
 
+void readFileTest(int FileID, char* buf, int length){
+	sfs_fread(FileID, buf, length);
+}
+
 int main(){
 	verySimpleMKSFSTest();
+
 	int a = openFileTest("Red");
 	char * buf = "Blue";
+
 	int b = openFileTest("Purple");
+
 	writeFileTest(a, buf, 4);
+
+	char * read_buf = malloc(1024*sizeof(char));
+	readFileTest(a, read_buf, 4);
+	printf("%s\n", read_buf);
+	free(read_buf);
 	WSeekTest(a, 3);
+
 	char * buf2 = "Green";
 	int s1 = getFileSizeTest("Red");
 	printf("%d\n", s1);
+
 	writeFileTest(a, buf2, 5);
+	read_buf = malloc(1024*sizeof(char));
+	readFileTest(a, read_buf, 8);
+	printf("%s\n", read_buf);
+	free(read_buf);
 	s1 = getFileSizeTest("Red");
 	printf("%d\n", s1);
 	getNextFileTest();
