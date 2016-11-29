@@ -21,7 +21,7 @@ typedef struct root_directory_entry{
 typedef struct I_Node{
   int size;
   int is_free;
-  int block_pointers[10];
+  int block_pointers[12];
   int indirect_pointer;
 }I_Node;
 
@@ -73,7 +73,7 @@ void init_inode_table(){
   for(int i=0; i<INODE_COUNT; i++){
     inode_table[i].size = 0;
     inode_table[i].is_free = 1;
-    for(int j=0; j<10; j++){
+    for(int j=0; j<12; j++){
       inode_table[i].block_pointers[j] = -1;
     }
   }
@@ -279,9 +279,11 @@ int sfs_get_next_file_name(char *fname){
   }
 }
 
-/**/
+/*Return the size of a file stored in the inode of that file.*/
 int sfs_get_file_size(char* path){
-  return 0;
+  int inode = get_inode_id(path);
+
+  return inode_table[inode].size;
 }
 
 /*Allocate inode and directory entry for new file*/
@@ -317,14 +319,13 @@ int sfs_fopen(char *name){
   int index = get_inode_id(name);
 
   /*File exists*/
-  /***NEED TO IMPLEMENT WRITE POINTER STARTING AT END OF FILE***/
   if(index>0){
     fd_table_index = find_free_fd_entry();
 
     fd_table[fd_table_index].inode_id = index;
     fd_table[fd_table_index].read_pointer = 0;
     /*Change this to actual end of file*/
-    fd_table[fd_table_index].write_pointer = 0;
+    fd_table[fd_table_index].write_pointer = inode_table[index].size;
     fd_table[fd_table_index].is_free = 0;
 
     return fd_table_index;
@@ -346,23 +347,41 @@ int sfs_fopen(char *name){
   return -1;
 }
 
-/*Return a pointer pointing to the end of the file pointed to by inode_id*/
-/*Strategy
-1. Find inode with inode_id
-2. Find last block_pointer in inode
-3. Read the block into a buffer then take sizeof(buffer) */
-// int find_end_of_file(int inode_id){
-
-// }
-
+/*Find the file in the fd_table and set all attributes of that entry to empty/free*/
 int sfs_fclose(int fileID){
-  	return 0;
+  fd_table[fileID].inode_id = -1;
+  fd_table[fileID].is_free = 1;
+  fd_table[fileID].read_pointer = 0;
+  fd_table[fileID].write_pointer = 0;
+  return 0;
 }
+
+/*Move the read pointer between the start and end of the file*/
 int sfs_frseek(int fileID, int loc){
-  	return 0;
+  int inode_id = fd_table[fileID].inode_id;
+  I_Node in = inode_table[inode_id];
+
+  if(loc > in.size){
+    return -1;
+  }
+
+  fd_table[fileID].read_pointer = loc;
+
+  return 0;
 }
+
+/*Move the write pointer between the start and end of the file*/
 int sfs_fwseek(int fileID, int loc){
-  	return 0;
+  int inode_id = fd_table[fileID].inode_id;
+  I_Node in = inode_table[inode_id];
+
+  if(loc > in.size){
+    return -1;
+  }
+
+  fd_table[fileID].write_pointer = loc;
+
+  return 0;
 }
 
 /*Write the contents of buf of size length to fileID
@@ -375,6 +394,9 @@ Strategy:
 6. Read block containing write pointer and place in buffer
 */
 int sfs_fwrite(int fileID, char *buf, int length){
+  /*
+  ********NEED TO CHECK IF FILE IS OPEN*********
+  */
   int inode_id = fd_table[fileID].inode_id;
   int write_pointer = fd_table[fileID].write_pointer;
 
@@ -462,6 +484,18 @@ int sfs_fwrite(int fileID, char *buf, int length){
     current_block++;
     size_in_blocks--;
   }
+
+  /*Update fd_table and inode table*/
+  fd_table[fileID].write_pointer = write_pointer + length;
+  inode_table[inode_id].size = in.size;
+  for(int k=0; k<12; k++){
+    inode_table[inode_id].block_pointers[k] = in.block_pointers[k];
+  }
+  
+
+  /*Flush changes to inode table and bitmap*/
+  write_blocks(1, 1, &inode_table);
+  write_blocks(2, 1, &bm);
 
   /*PURELY FOR TESTING*/
   void * b = malloc(4096*sizeof(char));
