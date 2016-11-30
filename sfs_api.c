@@ -13,7 +13,7 @@ char *filename = "file_system";
 typedef struct root_directory_entry{
   int inode_id : 32;
   /*Should equate to a file name with max 16 charcters*/
-  char filename[16];
+  char filename[30];
   int in_use : 8;
 }root_directory_entry;
 
@@ -21,7 +21,7 @@ typedef struct root_directory_entry{
 typedef struct I_Node{
   int size;
   int is_free;
-  int block_pointers[12];
+  int block_pointers[20];
   int indirect_pointer;
 }I_Node;
 
@@ -83,7 +83,7 @@ void init_inode_table(){
 
 /*Return first free inode in inode table*/
 int find_free_inode(){
-  for(int i=0; i<INODE_COUNT; i++){
+  for(int i=1; i<INODE_COUNT; i++){
     if(inode_table[i].is_free){
       return i;
     }
@@ -131,11 +131,12 @@ int get_free_directory_entry(){
   return -1;
 }
 
+
 /*Find the inode id of the file with name "filename"*/
-int get_inode_id(char * filename){
+int get_inode_id(char * name){
   for(int i=0; i<INODE_COUNT; i++){
-    if(!strcmp(rt[i].filename, filename)){
-      return i;
+    if(strcmp(rt[i].filename, name)==0 && rt[i].in_use==1){
+      return rt[i].inode_id;
     }
   }
   return -1;
@@ -327,6 +328,11 @@ int sfs_fopen(char *name){
 
   /*File exists*/
   if(index>0){
+    /*Check if already in fd_table*/
+    if(find_fd_index(name)>-1){
+      return -1;
+    }
+
     fd_table_index = find_free_fd_entry();
 
     fd_table[fd_table_index].inode_id = index;
@@ -373,6 +379,10 @@ int sfs_frseek(int fileID, int loc){
   int inode_id = fd_table[fileID].inode_id;
   I_Node in = inode_table[inode_id];
 
+  if(loc<0){
+    return -1;
+  }
+
   if(loc > in.size){
     return -1;
   }
@@ -386,6 +396,10 @@ int sfs_frseek(int fileID, int loc){
 int sfs_fwseek(int fileID, int loc){
   int inode_id = fd_table[fileID].inode_id;
   I_Node in = inode_table[inode_id];
+
+  if(loc<0){
+    return -1;
+  }
 
   if(loc > in.size){
     return -1;
@@ -430,7 +444,7 @@ int sfs_fwrite(int fileID, char *buf, int length){
   will be write pointer offset + length of file.
   Else size stays the same.*/
   int new_size = write_pointer + length;
-  int size_in_blocks = (length/1024)+1;
+  int size_in_blocks = (new_size/1024)+1;
   if(new_size>in.size){
     in.size = new_size;
   }
@@ -516,7 +530,7 @@ int sfs_fwrite(int fileID, char *buf, int length){
   return length;
 }
 
-/**/
+/*Read the content of the of fileID into buf*/
 int sfs_fread(int fileID, char *buf, int length){
   /*Check if file is open*/
   if(fd_table[fileID].is_free){
@@ -525,13 +539,11 @@ int sfs_fread(int fileID, char *buf, int length){
 
   int inode_id = fd_table[fileID].inode_id;
   int read_pointer = fd_table[fileID].read_pointer;
-  I_Node in = inode_table[inode_id];
-
-  printf("Size: %d\n", in.size);
+  I_Node inode = inode_table[inode_id];
 
   /*Check that length is not larger than the size of the file being read*/
-  if(length>in.size){
-    length = in.size;
+  if(length>inode.size){
+    length = inode.size;
   }
   
   if(length==0){
@@ -547,7 +559,7 @@ int sfs_fread(int fileID, char *buf, int length){
   /*Check to see if block_of_read_pointer and block_last_read are the same block*/
   if(block_of_read_pointer==block_last_read){
     void * only_read_buffer = malloc(1024*sizeof(char));
-    read_blocks(in.block_pointers[block_of_read_pointer], 1, only_read_buffer);
+    read_blocks(inode.block_pointers[block_of_read_pointer], 1, only_read_buffer);
     char * only_read_block = (char*)only_read_buffer;
     free(only_read_buffer);
 
@@ -572,7 +584,7 @@ int sfs_fread(int fileID, char *buf, int length){
 
   /*Read the first block into inital container*/
   void * first_read_buffer = malloc(1024*sizeof(char));
-  read_blocks(in.block_pointers[block_of_read_pointer], 1, first_read_buffer);
+  read_blocks(inode.block_pointers[block_of_read_pointer], 1, first_read_buffer);
   char * first_read_block = (char*)first_read_buffer;
   free(first_read_buffer);
 
@@ -586,7 +598,7 @@ int sfs_fread(int fileID, char *buf, int length){
   while(current<block_last_read){
 
     read_buffer = malloc(1024*sizeof(char));
-    read_blocks(in.block_pointers[current], 1, read_buffer);
+    read_blocks(inode.block_pointers[current], 1, read_buffer);
     read_block = (char*)first_read_buffer;
     free(read_buffer);
 
@@ -597,7 +609,7 @@ int sfs_fread(int fileID, char *buf, int length){
 
   /*Read the last block up to the specified length*/
   void * last_read_buffer = malloc(1024*sizeof(char));
-  read_blocks(in.block_pointers[block_last_read], 1, last_read_buffer);
+  read_blocks(inode.block_pointers[block_last_read], 1, last_read_buffer);
   char * last_read_block = (char*)last_read_buffer;
   free(last_read_buffer);
 
