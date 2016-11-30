@@ -196,14 +196,17 @@ int get_first_empty_block(){
   return -1;
 }
 
-int * find_contiguous_blocks(int size){
-  int to_return[size];
-  for(int i=0; i<size; i++){
-    to_return[i] = get_first_empty_block();
+/*Determine whether a file is in the fd table*/
+int find_fd_index(char *name){
+  int inode_id = get_inode_id(name);
+  for(int i=0; i<INODE_COUNT; i++){
+    if(fd_table[i].inode_id==inode_id){
+      return i;
+    }
   }
 
-  return to_return;
-
+  /*File not found*/
+  return -1;
 }
 
 /*Return the number of files in the root directory*/
@@ -263,10 +266,10 @@ int sfs_get_next_file_name(char *fname){
   /*Search through directory until end of directory reached or file found*/
   /*Root directory can be fragmented, hence the need for a loop*/
   while(1){
-    printf("%d\n", rt_pointer);
     if(rt_pointer == INODE_COUNT){
       rt_pointer = 0;
-      return 0;
+      printf("End of file\n");
+      return -1;
     }
 
     if(!rt[rt_pointer].in_use){
@@ -308,6 +311,10 @@ int sfs_create(char *name){
   /*Increment number of files counter*/
   current_file_count++;
   return inode_index;
+
+  /*Flush changes to inode table and root_directory table*/
+  write_blocks(1, 1, &inode_table);
+  write_blocks(3, 1, &rt);
 }
 
 /*Steps to open file
@@ -349,6 +356,11 @@ int sfs_fopen(char *name){
 
 /*Find the file in the fd_table and set all attributes of that entry to empty/free*/
 int sfs_fclose(int fileID){
+  if(fileID<0){
+    return -1;
+  }else if(fd_table[fileID].is_free){
+    return -1;
+  }
   fd_table[fileID].inode_id = -1;
   fd_table[fileID].is_free = 1;
   fd_table[fileID].read_pointer = 0;
@@ -495,20 +507,10 @@ int sfs_fwrite(int fileID, char *buf, int length){
   for(int k=0; k<12; k++){
     inode_table[inode_id].block_pointers[k] = in.block_pointers[k];
   }
-  
 
   /*Flush changes to inode table and bitmap*/
   write_blocks(1, 1, &inode_table);
   write_blocks(2, 1, &bm);
-
-  // /*PURELY FOR TESTING*/
-  // void * b = malloc(4096*sizeof(char));
-
-  // read_blocks(4,1,b);
-
-  // char * c = (char*) b;
-  // printf("Result: %s\n", c);
-
 
   free(container);
   return length;
@@ -524,6 +526,17 @@ int sfs_fread(int fileID, char *buf, int length){
   int inode_id = fd_table[fileID].inode_id;
   int read_pointer = fd_table[fileID].read_pointer;
   I_Node in = inode_table[inode_id];
+
+  printf("Size: %d\n", in.size);
+
+  /*Check that length is not larger than the size of the file being read*/
+  if(length>in.size){
+    length = in.size;
+  }
+  
+  if(length==0){
+    return 0;
+  }
 
   /*Find the block in which the read pointer is located*/
   int block_of_read_pointer = read_pointer/1024;
@@ -593,7 +606,56 @@ int sfs_fread(int fileID, char *buf, int length){
 
   return length;
 }
+
+/*Remove a file completely from the file system*/
 int sfs_remove(char *file){
-  	return 0;
+  /*Find the file in the root directory, inode table and fd table*/
+  int rt_index = get_inode_id(file);
+  /*No such directory entry exists*/
+  if(rt_index == -1){
+    return -1;
+  }
+
+  int inode_index = rt[rt_index].inode_id;
+  int fd_index = find_fd_index(file);
+  /*No such file descriptor exists*/
+  if(fd_index==-1){
+    return -1;
+  }
+
+  /*Root directory table*/
+  rt[rt_index].inode_id = -1;
+  strcpy(rt[rt_index].filename, "");
+  rt[rt_index].in_use = 0;
+
+  /*Bit map*/
+  for(int j=0; j<12; j++){
+    if(inode_table[inode_index].block_pointers[j]!=-1){
+      bm[inode_table[inode_index].block_pointers[j]] = 0;
+    }
+  }
+
+  /*Inode table*/
+  inode_table[inode_index].size = 0;
+  inode_table[inode_index].is_free = 1;
+  for(int i=0; i<12; i++){
+    inode_table[inode_index].block_pointers[i]=-1;
+  }
+  inode_table[inode_index].indirect_pointer = -1;
+
+  /*fd table */
+  fd_table[fd_index].inode_id = -1;
+  fd_table[fd_index].read_pointer = 0;
+  fd_table[fd_index].write_pointer = 0;
+  fd_table[fd_index].is_free = 1;
+
+  
+  /*Flush changes in rt_table, inode_table, and fd_table*/
+  write_blocks(1, 1, &inode_table);
+  write_blocks(2, 1, &bm);
+  write_blocks(3, 1, &rt);
+
+
+  return 0;
 }
 
