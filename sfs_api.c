@@ -324,12 +324,14 @@ void mksfs(int fresh){
 /*Find the next file being pointed in root_directory to and write filename into fname*/
 int sfs_get_next_file_name(char *fname){
 
-  strcpy(fname, rt[rt_pointer].filename);
-  if(rt_pointer == 0){
-    set_rt_pointer();
+  int count = get_file_count();
+
+  if(rt_pointer== count){
+    rt_pointer=0;
     return 0;
   }else{
-    rt_pointer--;
+    strcpy(fname, rt[rt_pointer].filename);
+    rt_pointer++;
     return 1;
   }
 
@@ -367,7 +369,6 @@ int sfs_create(char *name){
 
   /*Increment number of files counter  rt_pointer*/
   current_file_count++;
-  set_rt_pointer();
   return inode_index;
 }
 
@@ -695,7 +696,7 @@ int sfs_remove(char *file){
   /*Check the rt_index of the file being removed
   If it's greater  than the rt_pointer, the rt_pointer is not affected.
   Else the rt_pointer is decremented*/
-  if(rt_index<rt_pointer && rt_pointer!=0){
+  if(rt_index<=rt_pointer && rt_pointer!=0){
     rt_pointer--;
   }
   refactor_directory();
