@@ -13,7 +13,7 @@ char *filename = "file_system";
 typedef struct root_directory_entry{
   int inode_id : 32;
   /*Should equate to a file name with max 16 charcters*/
-  char filename[30];
+  char filename[21];
   int in_use : 8;
 }root_directory_entry;
 
@@ -21,7 +21,7 @@ typedef struct root_directory_entry{
 typedef struct I_Node{
   int size;
   int is_free;
-  int block_pointers[20];
+  int block_pointers[25];
   int indirect_pointer;
 }I_Node;
 
@@ -54,6 +54,7 @@ File_Descriptor fd_table[INODE_COUNT];
 void init_fd_table(){
   for(int i=0; i<INODE_COUNT; i++){
     fd_table[i].is_free = 1;
+    fd_table[i].inode_id = -1;
   }
 }
 
@@ -98,7 +99,7 @@ void init_root_directory(){
   current_file_count = 0;
 
   for(int i=0; i<INODE_COUNT; i++){
-    rt[i].inode_id = 0;
+    rt[i].inode_id = -1;
     // rt[i].filename = "";
     strcpy(rt[i].filename, "");
     rt[i].in_use = 0;
@@ -131,12 +132,71 @@ int get_free_directory_entry(){
   return -1;
 }
 
+/*Function used to defragment directory table*/
+void refactor_directory(){
+  root_directory_entry rt_temp[INODE_COUNT];
+  /*Initialize temp root directory*/
+  for(int i=0; i<INODE_COUNT; i++){
+    rt_temp[i].in_use = 0;
+    rt_temp[i].inode_id = -1;
+    strcpy(rt_temp[i].filename, "");
+  }
+
+  /*Place contents of rt in rt_temp without segmentation*/
+  int temp_index = 0;
+  for(int j=0; j<INODE_COUNT; j++){
+    if(rt[j].in_use==1){
+      rt_temp[temp_index].in_use = 1;
+      strcpy(rt_temp[temp_index].filename, rt[j].filename);
+      rt_temp[temp_index].inode_id = rt[j].inode_id;
+      temp_index++;
+    }
+  }
+
+  /*Wipe contents of rt in memory*/
+  for(int k=0; k<INODE_COUNT; k++){
+    rt[k].inode_id = -1;
+    strcpy(rt[k].filename, "");
+    rt[k].in_use = 0;
+  }
+
+  /*Replace contents of rt with rt_temp in memory*/
+  for(int l=0; l<INODE_COUNT; l++){
+    if(rt_temp[l].in_use==1){
+      rt[l].in_use = 1;
+      rt[l].inode_id = rt_temp[l].inode_id;
+      strcpy(rt[l].filename, rt_temp[l].filename);
+    }
+  }
+
+  /*Flush changes to the disk*/
+  write_blocks(3, 1, &rt);
+}
+
+void set_rt_pointer(){
+  rt_pointer = 0;
+  for(int i=0; i<INODE_COUNT; i++){
+    if(rt[i].in_use==1){
+      rt_pointer++;
+    }
+  }
+}
 
 /*Find the inode id of the file with name "filename"*/
 int get_inode_id(char * name){
   for(int i=0; i<INODE_COUNT; i++){
     if(strcmp(rt[i].filename, name)==0 && rt[i].in_use==1){
       return rt[i].inode_id;
+    }
+  }
+  return -1;
+}
+
+/*Find the rt_index of the file with name "filename" in the root directory*/
+int get_rt_index(char * name){
+  for(int i=0; i<INODE_COUNT; i++){
+    if(strcmp(rt[i].filename, name)==0 && rt[i].in_use==1){
+      return i;
     }
   }
   return -1;
@@ -264,23 +324,15 @@ void mksfs(int fresh){
 /*Find the next file being pointed in root_directory to and write filename into fname*/
 int sfs_get_next_file_name(char *fname){
 
-  /*Search through directory until end of directory reached or file found*/
-  /*Root directory can be fragmented, hence the need for a loop*/
-  while(1){
-    if(rt_pointer == INODE_COUNT){
-      rt_pointer = 0;
-      printf("End of file\n");
-      return -1;
-    }
-
-    if(!rt[rt_pointer].in_use){
-      rt_pointer++;
-    }else{
-      strcpy(fname, rt[rt_pointer].filename);
-      rt_pointer++;
-      return 1;
-    }
+  strcpy(fname, rt[rt_pointer].filename);
+  if(rt_pointer == 0){
+    set_rt_pointer();
+    return 0;
+  }else{
+    rt_pointer--;
+    return 1;
   }
+
 }
 
 /*Return the size of a file stored in the inode of that file.*/
@@ -309,13 +361,14 @@ int sfs_create(char *name){
   rt[free_directory_entry].in_use = 1;
   strcpy(rt[free_directory_entry].filename, name);
 
-  /*Increment number of files counter*/
-  current_file_count++;
-  return inode_index;
-
   /*Flush changes to inode table and root_directory table*/
   write_blocks(1, 1, &inode_table);
   write_blocks(3, 1, &rt);
+
+  /*Increment number of files counter  rt_pointer*/
+  current_file_count++;
+  set_rt_pointer();
+  return inode_index;
 }
 
 /*Steps to open file
@@ -329,7 +382,7 @@ int sfs_fopen(char *name){
   /*File exists*/
   if(index>0){
     /*Check if already in fd_table*/
-    if(find_fd_index(name)>-1){
+    if(find_fd_index(name)!=-1){
       return -1;
     }
 
@@ -362,7 +415,7 @@ int sfs_fopen(char *name){
 
 /*Find the file in the fd_table and set all attributes of that entry to empty/free*/
 int sfs_fclose(int fileID){
-  if(fileID<0){
+  if(fileID<0 || fileID>INODE_COUNT){
     return -1;
   }else if(fd_table[fileID].is_free){
     return -1;
@@ -622,7 +675,7 @@ int sfs_fread(int fileID, char *buf, int length){
 /*Remove a file completely from the file system*/
 int sfs_remove(char *file){
   /*Find the file in the root directory, inode table and fd table*/
-  int rt_index = get_inode_id(file);
+  int rt_index = get_rt_index(file);
   /*No such directory entry exists*/
   if(rt_index == -1){
     return -1;
@@ -639,6 +692,13 @@ int sfs_remove(char *file){
   rt[rt_index].inode_id = -1;
   strcpy(rt[rt_index].filename, "");
   rt[rt_index].in_use = 0;
+  /*Check the rt_index of the file being removed
+  If it's greater  than the rt_pointer, the rt_pointer is not affected.
+  Else the rt_pointer is decremented*/
+  if(rt_index<rt_pointer && rt_pointer!=0){
+    rt_pointer--;
+  }
+  refactor_directory();
 
   /*Bit map*/
   for(int j=0; j<12; j++){
