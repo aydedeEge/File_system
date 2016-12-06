@@ -595,6 +595,11 @@ int sfs_fread(int fileID, char *buf, int length){
   int read_pointer = fd_table[fileID].read_pointer;
   I_Node inode = inode_table[inode_id];
 
+  /*Do not read if file is empty*/
+  if(inode.size == 0){
+    return 0;
+  }
+
   /*Check that length is not larger than the size of the file being read*/
   if(length>inode.size){
     length = inode.size;
@@ -646,7 +651,7 @@ int sfs_fread(int fileID, char *buf, int length){
   strcpy(buf, first_read_block+(read_pointer%1024));
 
   /*Loop through each block between the read_pointer block and the last read block*/
-  int current = block_of_read_pointer;
+  int current = block_of_read_pointer+1;
   void * read_buffer;
   char * read_block;
   while(current<block_last_read){
